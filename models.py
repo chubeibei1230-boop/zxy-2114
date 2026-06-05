@@ -150,3 +150,33 @@ class CategoryMoveLog(Base):
     move_type = Column(String(30), default="move")
 
     category = relationship("Category", back_populates="move_logs")
+
+
+class RectificationTask(Base):
+    __tablename__ = "rectification_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
+    category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
+    slot_id = Column(Integer, ForeignKey("shelf_slots.id"), nullable=True)
+    display_status_id = Column(Integer, ForeignKey("display_statuses.id"), nullable=True)
+    assignee_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    creator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    title = Column(String(200), nullable=False)
+    description = Column(Text)
+    status = Column(String(20), nullable=False, default="pending")
+    rectification_note = Column(Text)
+    rectified_at = Column(DateTime, nullable=True)
+    deadline = Column(DateTime, nullable=True)
+    closed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    closed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    store = relationship("Store")
+    category = relationship("Category")
+    slot = relationship("ShelfSlot")
+    display_status = relationship("DisplayStatus")
+    assignee = relationship("User", foreign_keys=[assignee_id])
+    creator = relationship("User", foreign_keys=[creator_id])
+    closer = relationship("User", foreign_keys=[closed_by])

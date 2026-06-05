@@ -266,5 +266,164 @@ check("Admin update slot => OK", good_slot_by_admin, good_slot_by_admin.get("cap
 
 # ====================================================
 print("\n" + "=" * 50)
+print("Step 11: Create rectification tasks (admin)")
+print("=" * 50)
+from datetime import datetime, timedelta
+
+past_deadline = (datetime.utcnow() - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
+future_deadline = (datetime.utcnow() + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
+
+rt1 = post("/api/rectifications/", {
+    "store_id": s1id,
+    "category_id": food1["id"],
+    "slot_id": slot1["id"],
+    "display_status_id": ds1["id"],
+    "assignee_id": eid,
+    "title": "Fix cookie shelf display",
+    "description": "Cookies not aligned properly",
+    "deadline": past_deadline
+}, f"operator_id={aid}")
+check("Create rectification task 1 (overdue deadline)", rt1, rt1.get("status") == "pending")
+
+rt2 = post("/api/rectifications/", {
+    "store_id": s1id,
+    "category_id": drink1["id"],
+    "assignee_id": eid,
+    "title": "Drink area cleanup",
+    "deadline": future_deadline
+}, f"operator_id={aid}")
+check("Create rectification task 2 (future deadline)", rt2, rt2.get("status") == "pending")
+
+rt3 = post("/api/rectifications/", {
+    "store_id": s2id,
+    "category_id": food2["id"],
+    "assignee_id": eid,
+    "title": "Store2 food area reorganization"
+}, f"operator_id={aid}")
+check("Create rectification task 3 (store2)", rt3, rt3.get("status") == "pending")
+
+# ====================================================
+print("\n" + "=" * 50)
+print("Step 12: Rectification task - validation on creation")
+print("=" * 50)
+put(f"/api/categories/{cookie1['id']}/disable", {}, f"operator_id={aid}")
+bad_rt_disabled_cat = post("/api/rectifications/", {
+    "store_id": s1id,
+    "category_id": cookie1["id"],
+    "assignee_id": eid,
+    "title": "Should fail - disabled category"
+}, f"operator_id={aid}")
+check("Task with disabled category => 400", bad_rt_disabled_cat,
+      bad_rt_disabled_cat.get("_error") == 400 and "已停用" in bad_rt_disabled_cat.get("_detail", ""),
+      expect_no_error=False)
+put(f"/api/categories/{cookie1['id']}/enable", {}, f"operator_id={aid}")
+
+put(f"/api/shelves/slots/{slot2['id']}", {"is_active": False}, f"operator_id={aid}")
+bad_rt_invalid_slot = post("/api/rectifications/", {
+    "store_id": s1id,
+    "slot_id": slot2["id"],
+    "assignee_id": eid,
+    "title": "Should fail - inactive slot"
+}, f"operator_id={aid}")
+check("Task with inactive slot => 400", bad_rt_invalid_slot,
+      bad_rt_invalid_slot.get("_error") == 400 and "已失效" in bad_rt_invalid_slot.get("_detail", ""),
+      expect_no_error=False)
+put(f"/api/shelves/slots/{slot2['id']}", {"is_active": True}, f"operator_id={aid}")
+
+put(f"/api/displays/products/{prod1['id']}", {"is_active": False}, f"operator_id={aid}")
+bad_rt_offline_product = post("/api/rectifications/", {
+    "store_id": s1id,
+    "display_status_id": ds1["id"],
+    "assignee_id": eid,
+    "title": "Should fail - product offline"
+}, f"operator_id={aid}")
+check("Task with offline product display_status => 400", bad_rt_offline_product,
+      bad_rt_offline_product.get("_error") == 400 and "已下架" in bad_rt_offline_product.get("_detail", ""),
+      expect_no_error=False)
+put(f"/api/displays/products/{prod1['id']}", {"is_active": True}, f"operator_id={aid}")
+
+# ====================================================
+print("\n" + "=" * 50)
+print("Step 13: Rectification task workflow")
+print("=" * 50)
+process1 = put(f"/api/rectifications/{rt1['id']}/process", {}, f"operator_id={eid}")
+check("Start processing task1", process1, process1.get("status") == "processing")
+
+complete1 = put(f"/api/rectifications/{rt1['id']}/complete", {
+    "rectification_note": "Reorganized cookie display, all items aligned"
+}, f"operator_id={eid}")
+check("Complete task1", complete1, complete1.get("status") == "completed" and complete1.get("rectification_note") is not None)
+
+close1 = put(f"/api/rectifications/{rt1['id']}/close", {}, f"operator_id={sid}")
+check("Close task1 by supervisor", close1, close1.get("status") == "closed" and close1.get("closed_by") == sid)
+
+bad_close_unclosed = put(f"/api/rectifications/{rt2['id']}/close", {}, f"operator_id={sid}")
+check("Close pending task2 => 400", bad_close_unclosed,
+      bad_close_unclosed.get("_error") == 400,
+      expect_no_error=False)
+
+bad_complete_pending = put(f"/api/rectifications/{rt2['id']}/complete", {
+    "rectification_note": "Should fail"
+}, f"operator_id={eid}")
+check("Complete pending task2 => 400", bad_complete_pending,
+      bad_complete_pending.get("_error") == 400,
+      expect_no_error=False)
+
+# ====================================================
+print("\n" + "=" * 50)
+print("Step 14: List rectification tasks with filters")
+print("=" * 50)
+all_tasks = get("/api/rectifications/")
+check("List all tasks", all_tasks, isinstance(all_tasks, list) and len(all_tasks) >= 3)
+
+store1_tasks = get("/api/rectifications/", f"store_id={s1id}")
+check("Filter by store", store1_tasks, all(t["store_id"] == s1id for t in store1_tasks))
+
+pending_tasks = get("/api/rectifications/", "status=pending")
+check("Filter by status=pending", pending_tasks, all(t["status"] == "pending" for t in pending_tasks))
+
+assignee_tasks = get("/api/rectifications/", f"assignee_id={eid}")
+check("Filter by assignee", assignee_tasks, all(t["assignee_id"] == eid for t in assignee_tasks))
+
+# ====================================================
+print("\n" + "=" * 50)
+print("Step 15: Get rectification task detail with full context")
+print("=" * 50)
+detail1 = get(f"/api/rectifications/{rt1['id']}")
+check("Task detail has store_name", detail1, detail1.get("store_name") is not None)
+check("Task detail has category_path", detail1, detail1.get("category_path") is not None)
+check("Task detail has slot_code", detail1, detail1.get("slot_code") is not None)
+check("Task detail has assignee_name", detail1, detail1.get("assignee_name") is not None)
+check("Task detail has creator_name", detail1, detail1.get("creator_name") is not None)
+check("Task detail has closer_name", detail1, detail1.get("closer_name") is not None)
+check("Task detail is_overdue (deadline passed, but closed)", detail1, detail1.get("is_overdue") == False)
+
+detail2 = get(f"/api/rectifications/{rt2['id']}")
+check("Task2 detail is_overdue=false (future deadline)", detail2, detail2.get("is_overdue") == False)
+
+# ====================================================
+print("\n" + "=" * 50)
+print("Step 16: Rectification stats per store")
+print("=" * 50)
+stats = get("/api/rectifications/stats", f"operator_id={sid}")
+check("Rectification stats", stats, isinstance(stats, list) and len(stats) > 0)
+store1_stat = next((s for s in stats if s["store_id"] == s1id), None)
+check("Store1 stats found", store1_stat, store1_stat is not None and store1_stat.get("pending_count") is not None)
+store2_stat = next((s for s in stats if s["store_id"] == s2id), None)
+check("Store2 stats found", store2_stat, store2_stat is not None and store2_stat.get("pending_count") is not None)
+
+# ====================================================
+print("\n" + "=" * 50)
+print("Step 17: Historical traceability after entity changes")
+print("=" * 50)
+put(f"/api/categories/{drink1['id']}/disable", {}, f"operator_id={aid}")
+old_detail = get(f"/api/rectifications/{rt2['id']}")
+check("Old task still traceable after category disabled", old_detail,
+      old_detail.get("id") == rt2["id"] and old_detail.get("category_path") is not None)
+
+put(f"/api/categories/{drink1['id']}/enable", {}, f"operator_id={aid}")
+
+# ====================================================
+print("\n" + "=" * 50)
 print(f"RESULTS: {passed} passed, {failed} failed")
 print("=" * 50)

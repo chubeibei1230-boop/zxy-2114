@@ -283,6 +283,89 @@ class StoreCoverageOut(BaseModel):
     coverage_rate: float
 
 
+class RectificationTaskCreate(BaseModel):
+    store_id: int
+    category_id: Optional[int] = None
+    slot_id: Optional[int] = None
+    display_status_id: Optional[int] = None
+    assignee_id: int
+    title: str = Field(..., max_length=200)
+    description: Optional[str] = None
+    deadline: Optional[datetime] = None
+
+
+class RectificationTaskProcess(BaseModel):
+    pass
+
+
+class RectificationTaskComplete(BaseModel):
+    rectification_note: str
+    rectified_at: Optional[datetime] = None
+
+
+class RectificationTaskClose(BaseModel):
+    pass
+
+
+class RectificationTaskOut(BaseModel):
+    id: int
+    store_id: int
+    category_id: Optional[int]
+    slot_id: Optional[int]
+    display_status_id: Optional[int]
+    assignee_id: int
+    creator_id: int
+    title: str
+    description: Optional[str]
+    status: str
+    rectification_note: Optional[str]
+    rectified_at: Optional[datetime]
+    deadline: Optional[datetime]
+    closed_by: Optional[int]
+    closed_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class RectificationTaskDetailOut(BaseModel):
+    id: int
+    store_id: int
+    store_name: Optional[str] = None
+    category_id: Optional[int]
+    category_path: Optional[str] = None
+    slot_id: Optional[int]
+    slot_code: Optional[str] = None
+    display_status_id: Optional[int]
+    current_display_status: Optional[str] = None
+    assignee_id: int
+    assignee_name: Optional[str] = None
+    creator_id: int
+    creator_name: Optional[str] = None
+    title: str
+    description: Optional[str]
+    status: str
+    rectification_note: Optional[str]
+    rectified_at: Optional[datetime]
+    deadline: Optional[datetime]
+    closed_by: Optional[int]
+    closer_name: Optional[str] = None
+    closed_at: Optional[datetime]
+    is_overdue: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class StoreRectificationStatsOut(BaseModel):
+    store_id: int
+    store_name: str
+    pending_count: int
+    processing_count: int
+    overdue_count: int
+
+
 class FilterParams(BaseModel):
     store_id: Optional[int] = None
     category_id: Optional[int] = None
