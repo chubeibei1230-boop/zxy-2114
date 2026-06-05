@@ -339,6 +339,8 @@ class RectificationTaskDetailOut(BaseModel):
     slot_id: Optional[int]
     slot_code: Optional[str] = None
     display_status_id: Optional[int]
+    original_display_status: Optional[str] = None
+    original_display_remark: Optional[str] = None
     current_display_status: Optional[str] = None
     assignee_id: int
     assignee_name: Optional[str] = None

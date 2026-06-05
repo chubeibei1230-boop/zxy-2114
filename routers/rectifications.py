@@ -31,6 +31,14 @@ def _build_category_path(db: Session, category_id: int) -> str:
     return " > ".join(reversed(parts))
 
 
+def _get_slot_store_id(db: Session, slot_id: int) -> Optional[int]:
+    slot = db.query(ShelfSlot).filter(ShelfSlot.id == slot_id).first()
+    if not slot:
+        return None
+    zone = db.query(ShelfZone).filter(ShelfZone.id == slot.zone_id).first()
+    return zone.store_id if zone else None
+
+
 def _check_creation_validity(db: Session, data: RectificationTaskCreate):
     store = db.query(Store).filter(Store.id == data.store_id).first()
     if not store:
@@ -51,16 +59,24 @@ def _check_creation_validity(db: Session, data: RectificationTaskCreate):
         slot = db.query(ShelfSlot).filter(ShelfSlot.id == data.slot_id).first()
         if not slot:
             raise HTTPException(status_code=404, detail="货架位不存在")
-        zone = db.query(ShelfZone).filter(ShelfZone.id == slot.zone_id).first()
-        if zone and zone.store_id != data.store_id:
+        slot_store_id = _get_slot_store_id(db, data.slot_id)
+        if slot_store_id and slot_store_id != data.store_id:
             raise HTTPException(status_code=400, detail="货架位不属于该门店")
         if not slot.is_active:
             raise HTTPException(status_code=400, detail="货架位已失效，无法创建整改任务")
+        if data.category_id is not None and slot.category_id is not None:
+            if slot.category_id != data.category_id:
+                raise HTTPException(status_code=400, detail="货架位绑定的类目与任务类目不一致")
 
     if data.display_status_id is not None:
         ds = db.query(DisplayStatus).filter(DisplayStatus.id == data.display_status_id).first()
         if not ds:
             raise HTTPException(status_code=404, detail="陈列状态记录不存在")
+        ds_store_id = _get_slot_store_id(db, ds.slot_id)
+        if ds_store_id and ds_store_id != data.store_id:
+            raise HTTPException(status_code=400, detail="陈列状态所属门店与任务门店不一致")
+        if data.slot_id is not None and ds.slot_id != data.slot_id:
+            raise HTTPException(status_code=400, detail="陈列状态所属货架位与任务货架位不一致")
         if ds.product_id is not None:
             product = db.query(Product).filter(Product.id == ds.product_id).first()
             if product and not product.is_active:
@@ -73,7 +89,7 @@ def create_rectification_task(
     operator_id: int = Query(...),
     db: Session = Depends(get_db)
 ):
-    admin = require_admin(db, operator_id)
+    require_admin(db, operator_id)
 
     assignee = db.query(User).filter(User.id == data.assignee_id, User.is_active == True).first()
     if not assignee:
@@ -165,20 +181,41 @@ def get_rectification_task_detail(task_id: int, db: Session = Depends(get_db)):
     store = db.query(Store).filter(Store.id == task.store_id).first()
     store_name = store.name if store else None
 
+    effective_slot_id = task.slot_id
+    effective_category_id = task.category_id
+
+    if task.display_status_id is not None and effective_slot_id is None:
+        ds = db.query(DisplayStatus).filter(DisplayStatus.id == task.display_status_id).first()
+        if ds:
+            effective_slot_id = ds.slot_id
+
+    if effective_slot_id is not None and effective_category_id is None:
+        slot = db.query(ShelfSlot).filter(ShelfSlot.id == effective_slot_id).first()
+        if slot and slot.category_id is not None:
+            effective_category_id = slot.category_id
+
     category_path = None
-    if task.category_id is not None:
-        category_path = _build_category_path(db, task.category_id)
+    if effective_category_id is not None:
+        category_path = _build_category_path(db, effective_category_id)
 
     slot_code = None
-    if task.slot_id is not None:
-        slot = db.query(ShelfSlot).filter(ShelfSlot.id == task.slot_id).first()
+    if effective_slot_id is not None:
+        slot = db.query(ShelfSlot).filter(ShelfSlot.id == effective_slot_id).first()
         if slot:
             slot_code = slot.slot_code
 
+    original_display_status = None
+    original_display_remark = None
+    if task.display_status_id is not None:
+        orig_ds = db.query(DisplayStatus).filter(DisplayStatus.id == task.display_status_id).first()
+        if orig_ds:
+            original_display_status = orig_ds.status
+            original_display_remark = orig_ds.remark
+
     current_display_status = None
-    if task.slot_id is not None:
+    if effective_slot_id is not None:
         latest_ds = db.query(DisplayStatus).filter(
-            DisplayStatus.slot_id == task.slot_id
+            DisplayStatus.slot_id == effective_slot_id
         ).order_by(DisplayStatus.check_date.desc()).first()
         if latest_ds:
             current_display_status = latest_ds.status
@@ -205,11 +242,13 @@ def get_rectification_task_detail(task_id: int, db: Session = Depends(get_db)):
         id=task.id,
         store_id=task.store_id,
         store_name=store_name,
-        category_id=task.category_id,
+        category_id=effective_category_id,
         category_path=category_path,
-        slot_id=task.slot_id,
+        slot_id=effective_slot_id,
         slot_code=slot_code,
         display_status_id=task.display_status_id,
+        original_display_status=original_display_status,
+        original_display_remark=original_display_remark,
         current_display_status=current_display_status,
         assignee_id=task.assignee_id,
         assignee_name=assignee_name,

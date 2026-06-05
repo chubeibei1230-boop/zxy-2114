@@ -275,7 +275,7 @@ future_deadline = (datetime.utcnow() + timedelta(days=7)).strftime("%Y-%m-%dT%H:
 
 rt1 = post("/api/rectifications/", {
     "store_id": s1id,
-    "category_id": food1["id"],
+    "category_id": cookie1["id"],
     "slot_id": slot1["id"],
     "display_status_id": ds1["id"],
     "assignee_id": eid,
@@ -422,6 +422,81 @@ check("Old task still traceable after category disabled", old_detail,
       old_detail.get("id") == rt2["id"] and old_detail.get("category_path") is not None)
 
 put(f"/api/categories/{drink1['id']}/enable", {}, f"operator_id={aid}")
+
+# ====================================================
+print("\n" + "=" * 50)
+print("BUG FIX REGRESSION: Cross-store validations")
+print("=" * 50)
+ds2 = post("/api/displays/statuses/", {
+    "slot_id": slot2["id"],
+    "status": "abnormal",
+    "remark": "Store1 slot2 abnormal"
+}, f"operator_id={eid}")
+check("Create ds2 for store1 slot2", ds2)
+
+zone2 = get("/api/shelves/zones/", f"store_id={s2id}")
+slot2_s2 = post("/api/shelves/slots/", {
+    "zone_id": zone2[0]["id"],
+    "slot_code": "S2-01",
+    "position": 1,
+    "capacity": 5
+}, f"operator_id={aid}")
+ds_store2 = post("/api/displays/statuses/", {
+    "slot_id": slot2_s2["id"],
+    "status": "vacant"
+}, f"operator_id={eid}")
+check("Create display status for store2", ds_store2)
+
+bad_cross_store_ds = post("/api/rectifications/", {
+    "store_id": s1id,
+    "display_status_id": ds_store2["id"],
+    "assignee_id": eid,
+    "title": "Should fail - ds from store2"
+}, f"operator_id={aid}")
+check("Cross-store display_status => 400", bad_cross_store_ds,
+      bad_cross_store_ds.get("_error") == 400 and "门店不一致" in bad_cross_store_ds.get("_detail", ""),
+      expect_no_error=False)
+
+bad_mismatch_slot_ds = post("/api/rectifications/", {
+    "store_id": s1id,
+    "slot_id": slot1["id"],
+    "display_status_id": ds2["id"],
+    "assignee_id": eid,
+    "title": "Should fail - ds slot mismatch"
+}, f"operator_id={aid}")
+check("Display_status slot mismatch => 400", bad_mismatch_slot_ds,
+      bad_mismatch_slot_ds.get("_error") == 400 and "货架位不一致" in bad_mismatch_slot_ds.get("_detail", ""),
+      expect_no_error=False)
+
+# ====================================================
+print("\n" + "=" * 50)
+print("BUG FIX REGRESSION: Original vs current display status")
+print("=" * 50)
+rt_only_ds = post("/api/rectifications/", {
+    "store_id": s1id,
+    "display_status_id": ds1["id"],
+    "assignee_id": eid,
+    "title": "Task created from display_status only"
+}, f"operator_id={aid}")
+check("Create task with only display_status_id", rt_only_ds, rt_only_ds.get("status") == "pending")
+
+detail_only_ds = get(f"/api/rectifications/{rt_only_ds['id']}")
+check("Only-ds task has slot_code", detail_only_ds, detail_only_ds.get("slot_code") is not None)
+check("Only-ds task has category_path", detail_only_ds, detail_only_ds.get("category_path") is not None)
+check("Only-ds task has original_display_status", detail_only_ds, detail_only_ds.get("original_display_status") is not None)
+
+ds_new = post("/api/displays/statuses/", {
+    "slot_id": slot1["id"],
+    "status": "vacant",
+    "remark": "Newer check after task creation"
+}, f"operator_id={eid}")
+check("Create newer display status for slot1", ds_new)
+
+detail_after_new = get(f"/api/rectifications/{rt1['id']}")
+check("Original status not overwritten", detail_after_new,
+      detail_after_new.get("original_display_status") == ds1.get("status"))
+check("Current status updated", detail_after_new,
+      detail_after_new.get("current_display_status") == ds_new.get("status"))
 
 # ====================================================
 print("\n" + "=" * 50)
