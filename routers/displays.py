@@ -68,6 +68,8 @@ def create_mounting(data: ProductMountingCreate, operator_id: int = Query(...), 
     store = db.query(Store).filter(Store.id == data.store_id).first()
     if not store:
         raise HTTPException(status_code=404, detail="门店不存在")
+    if category.store_id != data.store_id:
+        raise HTTPException(status_code=400, detail="类目不属于该门店，不能跨门店挂载")
     mounting = ProductMounting(**data.model_dump())
     db.add(mounting)
     db.commit()

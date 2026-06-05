@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from database import get_db
-from models import ShelfZone, ShelfSlot, Store
+from models import ShelfZone, ShelfSlot, Store, Category
 from schemas import ShelfZoneCreate, ShelfZoneUpdate, ShelfZoneOut, ShelfSlotCreate, ShelfSlotUpdate, ShelfSlotOut
-from routers.auth import require_admin, require_executor
+from routers.auth import require_admin
 
 router = APIRouter(prefix="/api/shelves", tags=["货架分区管理"])
 
@@ -68,6 +68,12 @@ def create_slot(data: ShelfSlotCreate, operator_id: int = Query(...), db: Sessio
     zone = db.query(ShelfZone).filter(ShelfZone.id == data.zone_id).first()
     if not zone:
         raise HTTPException(status_code=404, detail="货架分区不存在")
+    if data.category_id is not None:
+        cat = db.query(Category).filter(Category.id == data.category_id).first()
+        if not cat:
+            raise HTTPException(status_code=404, detail="类目不存在")
+        if cat.store_id != zone.store_id:
+            raise HTTPException(status_code=400, detail="类目与货架分区不属于同一门店")
     slot = ShelfSlot(**data.model_dump())
     db.add(slot)
     db.commit()
@@ -102,10 +108,17 @@ def get_slot(slot_id: int, db: Session = Depends(get_db)):
 
 @router.put("/slots/{slot_id}", response_model=ShelfSlotOut)
 def update_slot(slot_id: int, data: ShelfSlotUpdate, operator_id: int = Query(...), db: Session = Depends(get_db)):
-    require_executor(db, operator_id)
+    require_admin(db, operator_id)
     slot = db.query(ShelfSlot).filter(ShelfSlot.id == slot_id).first()
     if not slot:
         raise HTTPException(status_code=404, detail="货架槽位不存在")
+    if data.category_id is not None:
+        cat = db.query(Category).filter(Category.id == data.category_id).first()
+        if not cat:
+            raise HTTPException(status_code=404, detail="类目不存在")
+        zone = db.query(ShelfZone).filter(ShelfZone.id == slot.zone_id).first()
+        if zone and cat.store_id != zone.store_id:
+            raise HTTPException(status_code=400, detail="类目与货架分区不属于同一门店")
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(slot, key, value)
     db.commit()

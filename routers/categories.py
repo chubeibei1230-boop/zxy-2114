@@ -266,6 +266,12 @@ def copy_category_to_store(data: CategoryCopy, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="目标门店不存在")
     if source.store_id == data.target_store_id:
         raise HTTPException(status_code=400, detail="不能复制到同一门店")
+    if data.target_parent_id is not None:
+        target_parent = db.query(Category).filter(Category.id == data.target_parent_id).first()
+        if not target_parent:
+            raise HTTPException(status_code=404, detail="目标父类目不存在")
+        if target_parent.store_id != data.target_store_id:
+            raise HTTPException(status_code=400, detail="目标父类目不属于目标门店")
     level = _compute_level(db, data.target_parent_id)
     _deep_copy_category(db, source, data.target_store_id, data.target_parent_id, level, data.operated_by)
     log = CategoryMoveLog(
